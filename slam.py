@@ -17,19 +17,29 @@ def motion_model(u, dt, ekf_state, vehicle_params):
     # Implement the vehicle model and its Jacobian you derived.
     ###
 
+    v_e, alpha = u[0], u[1]
+    v_c = (v_e)/(1-np.tan(vehicle_params['H']/vehicle_params['L']))
+    t_st = ekf_state['x'].copy()
+    phi = t_st[2]
+    el1 = dt*(v_c*np.cos(phi)-(v_c/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.sin(phi)+vehicle_params['b']*np.cos(phi)))
+    el2 = dt*(v_c*np.sin(phi)+(v_c/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.cos(phi)-vehicle_params['b']*np.sin(phi)))
+    el3 = dt*(v_c/vehicle_params['L'])*np.tan(alpha)
+    motion = np.array([[el1],[el2],[el3]])
+    el13 = -dt*v_c*(np.sin(phi)+(1/L)*np.tan(alpha)*(vehicle_params['a']*np.cos(phi)-vehicle_params['b']*np.sin(phi)))
+    el23 = dt*v_c*(np.cos(phi)-(1/L)*np.tan(alpha)*(vehicle_params['a']*np.sin(phi)+vehicle_params['b']*np.cos(phi)))
+    G = np.array([[1,0,el13],[0,1,el23],[0,0,1]]
+
     return motion, G
 
 def odom_predict(u, dt, ekf_state, vehicle_params, sigmas):
     '''
-    Perform the propagation step of the EKF filter given an odometry measurement u 
+    Perform the propagation step of the EKF filter given an odometry measurement u
     and time step dt where u = (ve, alpha) as shown in the vehicle/motion model.
 
     Returns the new ekf_state.
     '''
-
-    ###
-    # Implement the propagation
-    ###
+    t_st = ekf_state['x'].copy()
+    t_cov = ekf_state['P'].copy()
 
     return ekf_state
 
@@ -40,17 +50,17 @@ def gps_update(gps, ekf_state, sigmas):
 
     Returns the updated ekf_state.
     '''
-    
+
     ###
     # Implement the GPS update.
     ###
-    
+
     return ekf_state
 
 def laser_measurement_model(ekf_state, landmark_id):
-    ''' 
+    '''
     Returns the measurement model for a (range,bearing) sensor observing the
-    mapped landmark with id 'landmark_id' along with its jacobian. 
+    mapped landmark with id 'landmark_id' along with its jacobian.
 
     Returns:
         h(x, l_id): the 2x1 predicted measurement vector [r_hat, theta_hat].
@@ -59,7 +69,7 @@ def laser_measurement_model(ekf_state, landmark_id):
                 dimension 3 + 2*m, this should return the full 2 by 3+2m Jacobian
                 matrix corresponding to a measurement of the landmark_id'th feature.
     '''
-    
+
     ###
     # Implement the measurement model and its Jacobian you derived
     ###
@@ -85,7 +95,7 @@ def compute_data_association(ekf_state, measurements, sigmas, params):
     Computes measurement data association.
 
     Given a robot and map state and a set of (range,bearing) measurements,
-    this function should compute a good data association, or a mapping from 
+    this function should compute a good data association, or a mapping from
     measurements to landmarks.
 
     Returns an array 'assoc' such that:
@@ -112,7 +122,7 @@ def laser_update(trees, assoc, ekf_state, sigmas, params):
 
     assoc is the data association for the given set of trees, i.e. trees[i] is an observation of the
     ith landmark. If assoc[i] == -1, initialize a new landmark with the function initialize_landmark
-    in the state for measurement i. If assoc[i] == -2, discard the measurement as 
+    in the state for measurement i. If assoc[i] == -2, discard the measurement as
     it is too ambiguous to use.
 
     The diameter component of the measurement can be discarded.
@@ -134,7 +144,7 @@ def run_ekf_slam(events, ekf_state_0, vehicle_params, filter_params, sigmas):
         'P': ekf_state_0['P'].copy(),
         'num_landmarks': ekf_state_0['num_landmarks']
     }
-    
+
     state_history = {
         't': [0],
         'x': ekf_state['x'],
@@ -171,7 +181,7 @@ def run_ekf_slam(events, ekf_state_0, vehicle_params, filter_params, sigmas):
             if filter_params["do_plot"]:
                 slam_utils.do_plot(state_history['x'], ekf_state, trees, scan, assoc, plot, filter_params)
 
-        
+
         state_history['x'] = np.vstack((state_history['x'], ekf_state['x'][0:3]))
         state_history['P'] = np.vstack((state_history['P'], np.diag(ekf_state['P'][:3,:3])))
         state_history['t'].append(t)
@@ -190,10 +200,10 @@ def main():
     events.extend([('odo', x) for x in odo])
 
     events = sorted(events, key = lambda event: event[1][0])
-
+    #print(events)
     vehicle_params = {
         "a": 3.78,
-        "b": 0.50, 
+        "b": 0.50,
         "L": 2.83,
         "H": 0.76
     }
@@ -205,7 +215,7 @@ def main():
         # general...
         "do_plot": True,
         "plot_raw_laser": True,
-        "plot_map_covariances": True
+        "plot_map_covariances": False
 
         # Add other parameters here if you need to...
     }
