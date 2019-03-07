@@ -17,7 +17,7 @@ def motion_model(u, dt, ekf_state, vehicle_params):
     # Implement the vehicle model and its Jacobian you derived.
     ###
 
-    v_e, alpha = u[0], u[1]
+    v_e, alpha = u[0].copy(), u[1].copy()
     v_c = (v_e)/(1-np.tan(vehicle_params['H']/vehicle_params['L']))
     t_st = ekf_state['x'].copy()
     phi = t_st[2]
@@ -25,9 +25,9 @@ def motion_model(u, dt, ekf_state, vehicle_params):
     el2 = dt*(v_c*np.sin(phi)+(v_c/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.cos(phi)-vehicle_params['b']*np.sin(phi)))
     el3 = dt*(v_c/vehicle_params['L'])*np.tan(alpha)
     motion = np.array([[el1],[el2],[el3]])
-    el13 = -dt*v_c*(np.sin(phi)+(1/L)*np.tan(alpha)*(vehicle_params['a']*np.cos(phi)-vehicle_params['b']*np.sin(phi)))
-    el23 = dt*v_c*(np.cos(phi)-(1/L)*np.tan(alpha)*(vehicle_params['a']*np.sin(phi)+vehicle_params['b']*np.cos(phi)))
-    G = np.array([[1,0,el13],[0,1,el23],[0,0,1]]
+    el13 = -dt*v_c*(np.sin(phi)+(1/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.cos(phi)-vehicle_params['b']*np.sin(phi)))
+    el23 = dt*v_c*(np.cos(phi)-(1/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.sin(phi)+vehicle_params['b']*np.cos(phi)))
+    G = np.array([[1,0,el13],[0,1,el23],[0,0,1]])
 
     return motion, G
 
@@ -39,7 +39,24 @@ def odom_predict(u, dt, ekf_state, vehicle_params, sigmas):
     Returns the new ekf_state.
     '''
     t_st = ekf_state['x'].copy()
+    t_st = np.reshape(t_st,(t_st.shape[0],1))
     t_cov = ekf_state['P'].copy()
+    dim = t_st.shape[0]-3
+    F_x = np.hstack((np.eye(3),np.zeros((3,dim))))
+    mot, g = motion_model(u,dt,ekf_state,vehicle_params)
+    new_x = t_st + np.matmul(np.transpose(F_x),mot)
+    R_t = np.zeros((3,3))
+    R_t[0,0] = sigmas['xy']*sigmas['xy']
+    R_t[1,1] = sigmas['xy']*sigmas['xy']
+    R_t[2,2] = sigmas['phi']*sigmas['phi']
+    Gt_1 = np.hstack((g, np.zeros((3,dim))))
+    Gt_2 = np.hstack((np.zeros((dim,3)),np.eye(dim)))
+    Gt = np.vstack((Gt_1,Gt_2))
+    new_cov = np.matmul(Gt,np.matmul(t_cov,np.transpose(Gt)))+np.matmul(np.transpose(F_x),np.matmul(R_t,F_x))
+    new_cov = slam_utils.make_symmetric(new_cov)
+    new_x = np.reshape(new_x,(new_x.shape[0],))
+    ekf_state['x'] = new_x
+    ekf_state['P'] = new_cov
 
     return ekf_state
 
