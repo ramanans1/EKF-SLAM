@@ -2,6 +2,8 @@ from __future__ import division
 import numpy as np
 import slam_utils
 import tree_extraction
+from scipy.stats.distributions import chi2
+#https://ac.els-cdn.com/S0921889002002336/1-s2.0-S0921889002002336-main.pdf?_tid=d35bc9db-3c25-49c5-9f79-a65836027bc7&acdnat=1551829154_6ce461d1c7c7f5a9b00a8a4351b0fa41
 
 def motion_model(u, dt, ekf_state, vehicle_params):
     '''
@@ -12,11 +14,6 @@ def motion_model(u, dt, ekf_state, vehicle_params):
 
         df/dX, the 3x3 Jacobian of f with respect to the vehicle state (x, y, phi)
     '''
-
-    ###
-    # Implement the vehicle model and its Jacobian you derived.
-    ###
-
     v_e, alpha = u[0].copy(), u[1].copy()
     v_c = (v_e)/(1-np.tan(vehicle_params['H']/vehicle_params['L']))
     t_st = ekf_state['x'].copy()
@@ -24,10 +21,14 @@ def motion_model(u, dt, ekf_state, vehicle_params):
     el1 = dt*(v_c*np.cos(phi)-(v_c/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.sin(phi)+vehicle_params['b']*np.cos(phi)))
     el2 = dt*(v_c*np.sin(phi)+(v_c/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.cos(phi)-vehicle_params['b']*np.sin(phi)))
     el3 = dt*(v_c/vehicle_params['L'])*np.tan(alpha)
-    motion = np.array([[el1],[el2],[el3]])
+    el31 = slam_utils.clamp_angle(el3)
+    motion = np.array([[el1],[el2],[el31]])
     el13 = -dt*v_c*(np.sin(phi)+(1/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.cos(phi)-vehicle_params['b']*np.sin(phi)))
     el23 = dt*v_c*(np.cos(phi)-(1/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.sin(phi)+vehicle_params['b']*np.cos(phi)))
-    G = np.array([[1,0,el13],[0,1,el23],[0,0,1]])
+    G = np.array([[0,0,el13],[0,0,el23],[0,0,0]])
+
+    #print(motion)
+    #print(G)
 
     return motion, G
 
@@ -45,6 +46,7 @@ def odom_predict(u, dt, ekf_state, vehicle_params, sigmas):
     F_x = np.hstack((np.eye(3),np.zeros((3,dim))))
     mot, g = motion_model(u,dt,ekf_state,vehicle_params)
     new_x = t_st + np.matmul(np.transpose(F_x),mot)
+
     R_t = np.zeros((3,3))
     R_t[0,0] = sigmas['xy']*sigmas['xy']
     R_t[1,1] = sigmas['xy']*sigmas['xy']
@@ -71,6 +73,24 @@ def gps_update(gps, ekf_state, sigmas):
     ###
     # Implement the GPS update.
     ###
+    print('GPSP')
+    P = ekf_state['P']
+    P_mat = np.matrix(P)
+    r = np.transpose([gps - ekf_state['x'][:2]])
+    H_mat = np.matrix(np.zeros([2, P.shape[0]]))
+    H_mat[0, 0] = 1
+    H_mat[1, 1] = 1
+    R_mat = np.matrix(np.zeros([2, 2]))
+    R_mat[0, 0] = sigmas['gps'] ** 2
+    R_mat[1, 1] = sigmas['gps'] ** 2
+    S_mat = H_mat * P_mat * H_mat.T + R_mat
+    d = (np.matrix(r)).T * np.matrix(slam_utils.invert_2x2_matrix(np.array(S_mat))) * np.matrix(r)
+    if d <= chi2.ppf(0.999, 2):
+        K_mat = P_mat * H_mat.T * np.matrix(slam_utils.invert_2x2_matrix(np.array(S_mat)))
+        ekf_state['x'] = ekf_state['x'] + np.squeeze(np.array(K_mat * np.matrix(r)))
+        ekf_state['x'][2] = slam_utils.clamp_angle(ekf_state['x'][2])
+        ekf_state['P'] = slam_utils.make_symmetric(
+            np.array((np.matrix(np.eye(P.shape[0])) - K_mat * H_mat) * P_mat))
 
     return ekf_state
 
