@@ -33,9 +33,6 @@ def motion_model(u, dt, ekf_state, vehicle_params):
     el23 = dt*v_c*(np.cos(phi)-(1/L)*np.tan(alpha)*(a*np.sin(phi)+b*np.cos(phi)))
     G = np.array([[1,0,el13],[0,1,el23],[0,0,1]])
 
-    #print(motion)
-    #print(G)
-
     return motion, G
 
 def odom_predict(u, dt, ekf_state, vehicle_params, sigmas):
@@ -80,12 +77,10 @@ def gps_update(gps, ekf_state, sigmas):
     # Implement the GPS update.
     ###
     print('GPSP')
-    P = ekf_state['P']
-    P_mat = np.matrix(P)
+    P_mat = np.matrix(ekf_state['P'])
+    dim  = P_mat.shape[0]-2
+    H_mat = np.hstack((np.eye(2),np.zeros((2,dim))))
     r = np.transpose([gps - ekf_state['x'][:2]])
-    H_mat = np.matrix(np.zeros([2, P.shape[0]]))
-    H_mat[0, 0] = 1
-    H_mat[1, 1] = 1
     R_mat = np.matrix(np.zeros([2, 2]))
     R_mat[0, 0] = sigmas['gps'] ** 2
     R_mat[1, 1] = sigmas['gps'] ** 2
@@ -96,7 +91,7 @@ def gps_update(gps, ekf_state, sigmas):
         ekf_state['x'] = ekf_state['x'] + np.squeeze(np.array(K_mat * np.matrix(r)))
         ekf_state['x'][2] = slam_utils.clamp_angle(ekf_state['x'][2])
         ekf_state['P'] = slam_utils.make_symmetric(
-            np.array((np.matrix(np.eye(P.shape[0])) - K_mat * H_mat) * P_mat))
+            np.array((np.matrix(np.eye(P_mat.shape[0])) - K_mat * H_mat) * P_mat))
 
     return ekf_state
 
