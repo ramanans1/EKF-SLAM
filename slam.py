@@ -77,21 +77,20 @@ def gps_update(gps, ekf_state, sigmas):
     # Implement the GPS update.
     ###
     print('GPSP')
-    P_mat = np.matrix(ekf_state['P'])
-    dim  = P_mat.shape[0]-2
-    H_mat = np.hstack((np.eye(2),np.zeros((2,dim))))
+    P = ekf_state['P']
+    dim  = P.shape[0]-2
+    H = np.hstack((np.eye(2),np.zeros((2,dim))))
     r = np.transpose([gps - ekf_state['x'][:2]])
-    R_mat = np.matrix(np.zeros([2, 2]))
-    R_mat[0, 0] = sigmas['gps'] ** 2
-    R_mat[1, 1] = sigmas['gps'] ** 2
-    S_mat = H_mat * P_mat * H_mat.T + R_mat
-    d = (np.matrix(r)).T * np.matrix(slam_utils.invert_2x2_matrix(np.array(S_mat))) * np.matrix(r)
+    Q = (sigmas['gps']**2)*(np.eye(2))
+    S = np.matmul(np.matmul(H,P),H.T) + Q
+    S_inv = slam_utils.invert_2x2_matrix(S)
+    d = np.matmul(np.matmul(r.T,S_inv),r)
     if d <= chi2.ppf(0.999, 2):
-        K_mat = P_mat * H_mat.T * np.matrix(slam_utils.invert_2x2_matrix(np.array(S_mat)))
-        ekf_state['x'] = ekf_state['x'] + np.squeeze(np.array(K_mat * np.matrix(r)))
+        K = np.matmul(np.matmul(P,H.T),S_inv)
+        ekf_state['x'] = ekf_state['x'] + np.squeeze(np.matmul(K,r))
         ekf_state['x'][2] = slam_utils.clamp_angle(ekf_state['x'][2])
-        ekf_state['P'] = slam_utils.make_symmetric(
-            np.array((np.matrix(np.eye(P_mat.shape[0])) - K_mat * H_mat) * P_mat))
+        P_temp = np.matmul((np.eye(P.shape[0])- np.matmul(K,H)),P)
+        ekf_state['P'] = slam_utils.make_symmetric(P_temp)
 
     return ekf_state
 
