@@ -14,18 +14,24 @@ def motion_model(u, dt, ekf_state, vehicle_params):
 
         df/dX, the 3x3 Jacobian of f with respect to the vehicle state (x, y, phi)
     '''
-    v_e, alpha = u[0].copy(), u[1].copy()
-    v_c = (v_e)/(1-np.tan(vehicle_params['H']/vehicle_params['L']))
+
+    v_e = u[0]
+    alpha = u[1].copy()
+    v_c = (v_e)/(1-np.tan(alpha)*(vehicle_params['H']/vehicle_params['L']))
     t_st = ekf_state['x'].copy()
     phi = t_st[2]
-    el1 = dt*(v_c*np.cos(phi)-(v_c/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.sin(phi)+vehicle_params['b']*np.cos(phi)))
-    el2 = dt*(v_c*np.sin(phi)+(v_c/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.cos(phi)-vehicle_params['b']*np.sin(phi)))
-    el3 = dt*(v_c/vehicle_params['L'])*np.tan(alpha)
+    H = vehicle_params['H']
+    L = vehicle_params['L']
+    a = vehicle_params['a']
+    b = vehicle_params['b']
+    el1 = dt*(v_c*np.cos(phi)-(v_c/L)*np.tan(alpha)*(a*np.sin(phi)+b*np.cos(phi)))
+    el2 = dt*(v_c*np.sin(phi)+(v_c/L)*np.tan(alpha)*(a*np.cos(phi)-b*np.sin(phi)))
+    el3 = dt*(v_c/L)*np.tan(alpha)
     el31 = slam_utils.clamp_angle(el3)
     motion = np.array([[el1],[el2],[el31]])
-    el13 = -dt*v_c*(np.sin(phi)+(1/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.cos(phi)-vehicle_params['b']*np.sin(phi)))
-    el23 = dt*v_c*(np.cos(phi)-(1/vehicle_params['L'])*np.tan(alpha)*(vehicle_params['a']*np.sin(phi)+vehicle_params['b']*np.cos(phi)))
-    G = np.array([[0,0,el13],[0,0,el23],[0,0,0]])
+    el13 = -dt*v_c*(np.sin(phi)+(1/L)*np.tan(alpha)*(a*np.cos(phi)-b*np.sin(phi)))
+    el23 = dt*v_c*(np.cos(phi)-(1/L)*np.tan(alpha)*(a*np.sin(phi)+b*np.cos(phi)))
+    G = np.array([[1,0,el13],[0,1,el23],[0,0,1]])
 
     #print(motion)
     #print(G)
@@ -237,7 +243,7 @@ def main():
     events.extend([('odo', x) for x in odo])
 
     events = sorted(events, key = lambda event: event[1][0])
-    #print(events)
+
     vehicle_params = {
         "a": 3.78,
         "b": 0.50,
@@ -252,7 +258,7 @@ def main():
         # general...
         "do_plot": True,
         "plot_raw_laser": True,
-        "plot_map_covariances": False
+        "plot_map_covariances": True
 
         # Add other parameters here if you need to...
     }
@@ -265,8 +271,8 @@ def main():
 
         # Measurement noise
         "gps": 3,
-        "range": 0.4,
-        "bearing": 3*np.pi/180
+        "range": 0.5,
+        "bearing": 5*np.pi/180
     }
 
     # Initial filter state
