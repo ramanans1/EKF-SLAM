@@ -15,15 +15,15 @@ def motion_model(u, dt, ekf_state, vehicle_params):
         df/dX, the 3x3 Jacobian of f with respect to the vehicle state (x, y, phi)
     '''
 
-    v_e = u[0]
+    v_e = u[0].copy()
     alpha = u[1].copy()
-    v_c = (v_e)/(1-np.tan(alpha)*(vehicle_params['H']/vehicle_params['L']))
-    t_st = ekf_state['x'].copy()
-    phi = t_st[2]
     H = vehicle_params['H']
     L = vehicle_params['L']
     a = vehicle_params['a']
     b = vehicle_params['b']
+    v_c = (v_e)/(1-np.tan(alpha)*(H/L))
+    t_st = ekf_state['x'].copy()
+    phi = t_st[2]
     el1 = dt*(v_c*np.cos(phi)-(v_c/L)*np.tan(alpha)*(a*np.sin(phi)+b*np.cos(phi)))
     el2 = dt*(v_c*np.sin(phi)+(v_c/L)*np.tan(alpha)*(a*np.cos(phi)-b*np.sin(phi)))
     el3 = dt*(v_c/L)*np.tan(alpha)
@@ -76,7 +76,6 @@ def gps_update(gps, ekf_state, sigmas):
     ###
     # Implement the GPS update.
     ###
-    print('GPSP')
     P = ekf_state['P']
     dim  = P.shape[0]-2
     H = np.hstack((np.eye(2),np.zeros((2,dim))))
@@ -111,6 +110,23 @@ def laser_measurement_model(ekf_state, landmark_id):
     # Implement the measurement model and its Jacobian you derived
     ###
 
+    t_st = ekf_state['x'].copy()
+    t_st[2] = slam_utils.clamp_angle(t_st[2])
+    dim = t_st.shape[0]
+    r_x,r_y,phi = t_st[0],t_st[1],t_st[2]
+    m_x,m_y = t_st[3+2*landmark_id],t_st[4+2*landmark_id]
+    del_x = m_x - r_x
+    del_y = m_y - r_y
+    q = (del_x)**2+(del_y)**2
+    sqrt_q = np.sqrt(q)
+    zhat = [[sqrt_q],[slam_utils.clamp_angle(np.arctan2(del_y,del_x)-phi)]]
+    h = np.array([[-sqrt_q*del_x,-sqrt_q*del_y,0,sqrt_q*del_x,sqrt_q*del_y],[del_y,-del_x,-q,-del_y,del_x]])/q
+    F_x = np.zeros((5,dim))
+    F_x[:3,:3] = np.eye(3)
+    F_x[3,3+2*landmark_id]=1
+    F_x[4,4+2*landmark_id]=1
+    H = np.matmul(h,F_x)
+
     return zhat, H
 
 def initialize_landmark(ekf_state, tree):
@@ -124,6 +140,20 @@ def initialize_landmark(ekf_state, tree):
     ###
     # Implement this function.
     ###
+    t_x, t_y, phi = ekf_state['x'][0], ekf_state['x'][1], ekf_state['x'][2]
+    m_r, m_th = tree[0], tree[1]
+
+    m_x = t_x + m_r*np.cos(m_th + phi)
+    m_y = t_y + m_r*np.sin(m_th + phi)
+    ekf_state['x'] = np.hstack((ekf_state['x'], m_x,m_y))
+
+    temp_p = ekf_state['P']
+    temp_p = np.vstack((temp_p,np.zeros((1,temp_p.shape[1])),np.zeros((1,temp_p.shape[1]))))
+    temp_p = np.hstack((temp_p,np.zeros((temp_p.shape[0],1)),np.zeros((temp_p.shape[0],1))))
+    temp_p[temp_p.shape[0]-1,temp_p.shape[0]-1] = 1000
+    temp_p[temp_p.shape[0]-2,temp_p.shape[0]-2] = 1000
+    ekf_state['P'] = temp_p
+    ekf_state['num_landmarks'] = ekf_state['num_landmarks'] + 1
 
     return ekf_state
 
@@ -149,6 +179,50 @@ def compute_data_association(ekf_state, measurements, sigmas, params):
     # Implement this function.
     ###
 
+    n_landmarks = ekf_state['num_landmarks']
+    n_measurements = len(measurements)
+    M = np.zeros((n_measurements, n_landmarks))
+    Q_t = np.array([[sigmas['range']**2, 0], [0, sigmas['bearing']**2]])
+
+    alpha = chi2.ppf(0.95, 2)
+    beta = chi2.ppf(0.99, 2)
+    Aug = alpha*np.ones((n_measurements, n_measurements))
+
+    for k in range(n_landmarks):
+        zhat, H = laser_measurement_model(ekf_state, k)
+        S = np.matmul(H, np.matmul(ekf_state['P'],H.T)) + Q_t
+        Sinv = slam_utils.invert_2x2_matrix(S)
+
+        for j in range(n_measurements):
+            innovation = measurements[j][:2] - np.squeeze(zhat)
+            M[j, k] = np.matmul(np.transpose(innovation), np.matmul(Sinv, innovation))
+
+    MAug = np.hstack((M, Aug))
+    #print('maug',MAug)
+    pairs = slam_utils.solve_cost_matrix_heuristic(MAug)
+    #print('unsorted',pairs)
+    pairs.sort()
+    #print('sorted',pairs)
+
+    # def newLandmark(x):
+    #     #print('x',x[1])
+    #     if x[1] >= n_landmarks:
+    #         return x[0], -1
+    #     else:
+    #         return x
+
+    temp = list(map(lambda x:(x[0],-1) if x[1]>=n_landmarks else (x[0],x[1]),pairs))
+    assoc = list(map(lambda x:x[1],temp))
+    #temp = [newLandmark(x) for x in pairs]
+    #assoc = [x[1] for x in temp]
+
+    for i in range(len(assoc)):
+        if assoc[i] == -1:
+            for j in range(M.shape[1]):
+                if M[i, j] < beta:
+                    assoc[i] = -2
+                    break
+
     return assoc
 
 def laser_update(trees, assoc, ekf_state, sigmas, params):
@@ -170,6 +244,32 @@ def laser_update(trees, assoc, ekf_state, sigmas, params):
     ###
     # Implement the EKF update for a set of range, bearing measurements.
     ###
+    Q_t = np.array([[sigmas['range']**2, 0], [0, sigmas['bearing']**2]])
+
+    for i in range(len(trees)):
+        j = assoc[i]
+        if j == -1:
+            ekf_state = initialize_landmark(ekf_state, trees[i])
+            j = np.int(len(ekf_state['x'])/2) - 2
+        elif j == -2:
+            continue
+        dim = ekf_state['x'].shape[0]
+        z_hat, H = laser_measurement_model(ekf_state, j)
+
+        S = np.matmul(H,np.matmul(ekf_state['P'],H.T)) + Q_t
+        S_inv = np.linalg.inv(S)
+        K = np.matmul(np.matmul(ekf_state['P'],H.T), S_inv)
+        z = np.zeros((2, 1))
+        z[0,0] = trees[i][0]
+        z[1,0] = trees[i][1]
+
+        inno = z - z_hat
+        temp_st = ekf_state['x'] + np.squeeze(np.matmul(K, inno))
+        temp_st[2] = slam_utils.clamp_angle(temp_st[2])
+        ekf_state['x'] = temp_st
+        temp_p = np.matmul((np.eye(dim) - np.matmul(K, H)), ekf_state['P'])
+        temp_p = slam_utils.make_symmetric(temp_p)
+        ekf_state['P'] = temp_p
 
     return ekf_state
 
@@ -212,7 +312,9 @@ def run_ekf_slam(events, ekf_state_0, vehicle_params, filter_params, sigmas):
         else:
             # Laser
             scan = event[1][1:]
+            #print('scan',scan.shape)
             trees = tree_extraction.extract_trees(scan, filter_params)
+            #print('trees',trees[0])
             assoc = compute_data_association(ekf_state, trees, sigmas, filter_params)
             ekf_state = laser_update(trees, assoc, ekf_state, sigmas, filter_params)
             if filter_params["do_plot"]:
@@ -251,8 +353,8 @@ def main():
 
         # general...
         "do_plot": True,
-        "plot_raw_laser": True,
-        "plot_map_covariances": True
+        "plot_raw_laser": False,
+        "plot_map_covariances": False
 
         # Add other parameters here if you need to...
     }
