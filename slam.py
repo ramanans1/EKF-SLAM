@@ -172,50 +172,34 @@ def compute_data_association(ekf_state, measurements, sigmas, params):
     '''
 
     if ekf_state["num_landmarks"] == 0:
-        # set association to init new landmarks for all measurements
         return [-1 for m in measurements]
 
-    ###
-    # Implement this function.
-    ###
-
-    n_landmarks = ekf_state['num_landmarks']
-    n_measurements = len(measurements)
-    M = np.zeros((n_measurements, n_landmarks))
+    n_lmark = ekf_state['num_landmarks']
+    n_scans = len(measurements)
+    M = np.zeros((n_scans, n_lmark))
     Q_t = np.array([[sigmas['range']**2, 0], [0, sigmas['bearing']**2]])
 
     alpha = chi2.ppf(0.95, 2)
     beta = chi2.ppf(0.99, 2)
-    Aug = alpha*np.ones((n_measurements, n_measurements))
+    A = alpha*np.ones((n_scans, n_scans))
 
-    for k in range(n_landmarks):
-        zhat, H = laser_measurement_model(ekf_state, k)
+    for i in range(n_lmark):
+        zhat, H = laser_measurement_model(ekf_state, i)
         S = np.matmul(H, np.matmul(ekf_state['P'],H.T)) + Q_t
         Sinv = slam_utils.invert_2x2_matrix(S)
+        for j in range(n_scans):
+            temp_z = measurements[j][:2]
+            res = temp_z - np.squeeze(zhat)
+            M[j, i] = np.matmul(res.T, np.matmul(Sinv, res))
 
-        for j in range(n_measurements):
-            innovation = measurements[j][:2] - np.squeeze(zhat)
-            M[j, k] = np.matmul(np.transpose(innovation), np.matmul(Sinv, innovation))
-
-    MAug = np.hstack((M, Aug))
-    #print('maug',MAug)
-    pairs = slam_utils.solve_cost_matrix_heuristic(MAug)
-    #print('unsorted',pairs)
+    M_new = np.hstack((M, A))
+    pairs = slam_utils.solve_cost_matrix_heuristic(M_new)
     pairs.sort()
-    #print('sorted',pairs)
 
-    # def newLandmark(x):
-    #     #print('x',x[1])
-    #     if x[1] >= n_landmarks:
-    #         return x[0], -1
-    #     else:
-    #         return x
+    pairs = list(map(lambda x:(x[0],-1) if x[1]>=n_lmark else (x[0],x[1]),pairs))
+    assoc = list(map(lambda x:x[1],pairs))
 
-    temp = list(map(lambda x:(x[0],-1) if x[1]>=n_landmarks else (x[0],x[1]),pairs))
-    assoc = list(map(lambda x:x[1],temp))
-    #temp = [newLandmark(x) for x in pairs]
-    #assoc = [x[1] for x in temp]
-
+# TODO FIND OUT HOW TO VECTORIZE THIS SECTION, AND THE FOR LOOP ABOVE
     for i in range(len(assoc)):
         if assoc[i] == -1:
             for j in range(M.shape[1]):
