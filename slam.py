@@ -3,7 +3,7 @@ import numpy as np
 import slam_utils
 import tree_extraction
 from scipy.stats.distributions import chi2
-#https://ac.els-cdn.com/S0921889002002336/1-s2.0-S0921889002002336-main.pdf?_tid=d35bc9db-3c25-49c5-9f79-a65836027bc7&acdnat=1551829154_6ce461d1c7c7f5a9b00a8a4351b0fa41
+
 
 def motion_model(u, dt, ekf_state, vehicle_params):
     '''
@@ -199,7 +199,6 @@ def compute_data_association(ekf_state, measurements, sigmas, params):
     pairs = list(map(lambda x:(x[0],-1) if x[1]>=n_lmark else (x[0],x[1]),pairs))
     assoc = list(map(lambda x:x[1],pairs))
 
-# TODO FIND OUT HOW TO VECTORIZE THIS SECTION, AND THE FOR LOOP ABOVE
     for i in range(len(assoc)):
         if assoc[i] == -1:
             for j in range(M.shape[1]):
